@@ -148,9 +148,10 @@ public class PortSniffer {
 			logger.info("Example: PortSniffer 192.168.0.1 255.255.255.0 21-29");
 			logger.info("Example: PortSniffer 192.168.0.1 255.255.255.0 21,23,29");
 		}
-		List<String> ips = getLocalAreaIpList("134.80.132.189", "255.255.255.0", true);
+		List<String> ips = getLocalAreaIpList(args[0], args[1], true);
+//		List<String> ips = getLocalAreaIpList("134.80.132.189", "255.255.255.0", true);
 		for (String ip : ips) {
-			logger.info(ip + "'s port 21 opened : " + isOpen(ip, 21));
+			logger.info(ip + "'s port " + args[2] + " opened : " + isOpen(ip, Integer.parseInt(args[2])));
 		}
 	}
 }
