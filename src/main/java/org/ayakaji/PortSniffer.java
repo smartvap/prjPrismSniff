@@ -1,15 +1,24 @@
 package org.ayakaji;
 
 import java.io.IOException;
+import java.net.Inet4Address;
 import java.net.InetSocketAddress;
+import java.net.InterfaceAddress;
+import java.net.NetworkInterface;
 import java.net.Socket;
+import java.net.SocketException;
 import java.util.ArrayList;
+import java.util.Collections;
+import java.util.Iterator;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.logging.Logger;
 import java.util.regex.Pattern;
 
+import com.alibaba.fastjson.JSONObject;
+
 public class PortSniffer {
-	
+
 	private final static Logger logger = Logger.getLogger(PortSniffer.class.getName());
 	private final static String IPV4 = "^((2(5[0-5]|[0-4]\\d))|[0-1]?\\d{1,2})(\\.((2(5[0-5]|[0-4]\\d))|[0-1]?\\d{1,2})){3}$";
 	private final static String IP_MASK = "^((128|192)|2(24|4[08]|5[245]))(\\.(0|(128|192)|2((24)|(4[08])|(5[245])))){3}$";
@@ -133,6 +142,75 @@ public class PortSniffer {
 			ipList.add(generateIp);
 		}
 		return ipList;
+	}
+
+	/**
+	 * Get Mask from network prefix
+	 * 
+	 * @param prefix
+	 * @return
+	 */
+	private static String getMask(int prefix) {
+		if (prefix > 32) // Adjust invalid prefix
+			prefix = 32;
+		else if (prefix < 0)
+			prefix = 0;
+		// Convert prefix to binary numeric string
+		String binary = String.format("%0" + prefix + "d", 0).replace("0", "1")
+				+ String.format("%0" + (32 - prefix) + "d", 0);
+		// Divide the binary numeric string into 4 equal parts, then convert to decimal
+		// and merge them
+		return Integer.valueOf(binary.substring(0, 8), 2) + "." + Integer.valueOf(binary.substring(8, 16), 2) + "."
+				+ Integer.valueOf(binary.substring(16, 24), 2) + "." + Integer.valueOf(binary.substring(24, 32), 2);
+	}
+
+	/**
+	 * Get the valid IPv4 address on the current node and all addresses within the same subnet
+	 * 
+	 * @return
+	 * @throws SocketException
+	 */
+	public static LinkedHashMap<String, List<String>> getV4InetAddrs() throws SocketException {
+		LinkedHashMap<String, List<String>> mapAddrs = new LinkedHashMap<String, List<String>>();
+		// For all local network interfaces
+		for (NetworkInterface nic : Collections.list(NetworkInterface.getNetworkInterfaces())) {
+			// Eliminate loopback interfaces and inactive network interfaces
+			if ((!nic.isLoopback()) && nic.isUp()) {
+				// Get all network addresses of the current interface
+				for (InterfaceAddress infAddr : nic.getInterfaceAddresses()) {
+					// Only keep IPv4 addresses
+					if (infAddr.getAddress() instanceof Inet4Address) {
+						String addr = infAddr.getAddress().getHostAddress();
+						String mask = getMask(infAddr.getNetworkPrefixLength());
+						mapAddrs.put(addr, getLocalAreaIpList(addr, mask, true));
+					}
+				}
+			}
+		}
+		logger.info(JSONObject.toJSONString(mapAddrs));
+		return mapAddrs;
+	}
+
+	/**
+	 * Check whether the source address and destination address belong to the same
+	 * subnet, the subnet list can only be obtained from the current node
+	 * 
+	 * @param srcAddr
+	 * @param dstAddr
+	 * @param mapAddrs
+	 * @return
+	 */
+	public static boolean isSameSubnet(String srcAddr, String dstAddr, LinkedHashMap<String, List<String>> mapAddrs) {
+		if (dstAddr.equals("134.80.19.90")) {
+			System.out.println("captured!");
+		}
+		Iterator<String> itrKey = mapAddrs.keySet().iterator();
+		while (itrKey.hasNext()) {
+			List<String> ipList = mapAddrs.get(itrKey.next());
+			if (ipList.contains(srcAddr) && ipList.contains(dstAddr))
+				return true;
+		}
+		return false;
 	}
 
 	public static void main(String[] args) {

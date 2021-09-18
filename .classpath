@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <classpath>
-	<classpathentry kind="src" output="target/classes" path="src/main/java">
+	<classpathentry excluding="org/ayakaji/Agent.java|org/ayakaji/MiniHoneypot.java" kind="src" output="target/classes" path="src/main/java">
 		<attributes>
 			<attribute name="org.eclipse.jdt.launching.CLASSPATH_ATTR_LIBRARY_PATH_ENTRY" value="prjPrismSniff/src/main/native"/>
 			<attribute name="optional" value="true"/>

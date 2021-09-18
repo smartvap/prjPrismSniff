@@ -1,7 +1,10 @@
 package org.ayakaji;
 
+import java.io.File;
+import java.io.FileWriter;
 import java.io.IOException;
 import java.net.Inet4Address;
+import java.net.SocketException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -18,6 +21,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.logging.Logger;
 
+import org.joda.time.DateTime;
 import org.pcap4j.core.BpfProgram.BpfCompileMode;
 import org.pcap4j.core.NotOpenException;
 import org.pcap4j.core.PacketListener;
@@ -39,18 +43,54 @@ import com.alibaba.fastjson.JSONObject;
 
 public class NetPolicyRebuilder implements Runnable {
 	private final static Logger logger = Logger.getLogger(NetPolicyRebuilder.class.getName());
+
+	/**
+	 * In order to improve writing efficiency and avoid dependence on external
+	 * databases, all strategies are temporarily stored in the memory library
+	 */
 	private final static String hsqlDriver = "org.hsqldb.jdbcDriver";
 	private final static String hsqlUrl = "jdbc:hsqldb:mem:prism";
 	private final static String hsqlUser = "sa";
 	private final static String hsqlPass = "";
 	private static Connection conn = null;
+
+	/**
+	 * Traffic analysis program uses threads for scheduling
+	 */
 	private Thread thread = null;
+
+	/**
+	 * The initial strategy is a strategy that has not been converged, its
+	 * characteristic is: the source port of the initial strategy is a fixed value.
+	 * E.g 192.168.0.2:28374 --> 192.168.0.1:80. The convergence strategy is the
+	 * opposite, the source port is a unfixed value. E.g 192.168.0.2:* -->
+	 * 192.168.0.1:80
+	 */
 	private final static int STATUS_ERR = 0; // match result status
 	private final static int STATUS_MATCH_INIT = 1; // exactly match with initial strategy
 	private final static int STATUS_PART_INIT = 2; // partialy match with initial strategy
 	private final static int STATUS_MATCH_CONV = 3; // match with convergent strategy
 	private final static int STATUS_INIT_STRATEGY = 4; // new strategy
+
+	/**
+	 * The custom packet filter, 10.233.0.0/18 is k8s's service subnet,
+	 * 10.222.64.0/18 is k8s's pods' addresses
+	 */
 	private final static String filter = "not net 10.233.0.0/18 and not net 10.222.64.0/18 and not net 224.0.0.0/24 and not ( ip[20+12:1]=10 and ip[20+13:1]=222 and ip[20+16:1]=10 and ip[20+17:1]=222 ) and not host 255.255.255.255 and not host 127.0.0.1 and not arp and not icmp and not icmp6";
+	private static PcapHandle ph = null; // handler of pcap4j
+
+	/**
+	 * The effective interface address and mask of the current node
+	 */
+	private static LinkedHashMap<String, List<String>> mapInfAddrs;
+	static {
+		try {
+			mapInfAddrs = PortSniffer.getV4InetAddrs();
+		} catch (SocketException e) {
+			mapInfAddrs = new LinkedHashMap<String, List<String>>();
+			logger.severe("Cannot get interfaces' addresses!");
+		}
+	}
 
 	/**
 	 * Database initialization
@@ -106,7 +146,11 @@ public class NetPolicyRebuilder implements Runnable {
 		} else {
 			logger.warning("Could not find any eligible network interface!");
 		}
-		PcapHandle ph = pni.openLive(65536, PromiscuousMode.PROMISCUOUS, 50);
+		if (ph != null) {
+			logger.severe("Pcap4j already initialized!");
+			return;
+		}
+		ph = pni.openLive(65536, PromiscuousMode.PROMISCUOUS, 50);
 		ph.setFilter(filter, BpfCompileMode.OPTIMIZE);
 		ph.loop(-1, new PacketListener() {
 			@Override
@@ -201,6 +245,9 @@ public class NetPolicyRebuilder implements Runnable {
 	 *  6. Normalize this packet in <client-ip>:<client-port>:<tcp|udp>:<server-ip>:<server-port> 
 	 *     format as initialized strategy
 	 *  7. Write this initialized strategy into database
+	 * 
+	 * Bug Fix:
+	 *  1. Ignore the port mode of FTP protocol, which is, if one end is 20 port, it will be ignored
 	 * @param srcAddr
 	 * @param srcPort
 	 * @param proto
@@ -212,9 +259,13 @@ public class NetPolicyRebuilder implements Runnable {
 	private static void analyze(String srcAddr, String srcPort, String proto, String dstAddr, String dstPort) {
 		int status = STATUS_ERR;
 		boolean bSwap = false; // Whether the order of the initiator and the receiver is reversed
+		if (srcPort.equals("20") || dstPort.equals("20")) // Ignore the port mode of FTP protocol
+			return;
+		if (PortSniffer.isSameSubnet(srcAddr, dstAddr, mapInfAddrs)) // Ignore connections belonging to the same subnet
+			return;
 		try {
-			status = match(srcAddr, srcPort, proto, dstAddr, dstPort);
-			if (status == STATUS_INIT_STRATEGY) { // If not match, then try to change the order
+			status = match(srcAddr, srcPort, proto, dstAddr, dstPort); // Try to match with hsql
+			if (status == STATUS_INIT_STRATEGY) { // If not match, then reverse the direction
 				status = match(dstAddr, dstPort, proto, srcAddr, srcPort);
 				bSwap = true; // reversed
 			}
@@ -223,10 +274,10 @@ public class NetPolicyRebuilder implements Runnable {
 			return;
 		}
 		if (status == STATUS_MATCH_INIT || status == STATUS_MATCH_CONV) {
-			;
+			; // Do nothing
 		} else if (status == STATUS_PART_INIT) {
 			try {
-				if (bSwap) {
+				if (bSwap) { // If already reverse the direction
 					converge(dstAddr, dstPort, proto, srcAddr, srcPort);
 				} else {
 					converge(srcAddr, srcPort, proto, dstAddr, dstPort);
@@ -234,10 +285,10 @@ public class NetPolicyRebuilder implements Runnable {
 			} catch (SQLException e) {
 				logger.warning(e.getMessage());
 			}
-		} else if (status == STATUS_INIT_STRATEGY) {
-			if (Util.isOpen(srcAddr, srcPort)) {
+		} else if (status == STATUS_INIT_STRATEGY) { // New strategy
+			if (Util.isOpen(srcAddr, srcPort)) { // Confirm the conversation direction
 				try {
-					append(dstAddr, dstPort, proto, srcAddr, srcPort);
+					append(dstAddr, dstPort, proto, srcAddr, srcPort); // Write to database hsql
 				} catch (SQLException e) {
 					logger.warning(e.getMessage());
 				}
@@ -405,6 +456,11 @@ public class NetPolicyRebuilder implements Runnable {
 		return STATUS_INIT_STRATEGY;
 	}
 
+	/**
+	 * Export the policy data in the memory library as a json file
+	 * 
+	 * @throws SQLException
+	 */
 	private static void dump() throws SQLException {
 		if (conn == null || conn.isClosed()) {
 			logger.warning("Database connection is unavailable!");
@@ -419,6 +475,17 @@ public class NetPolicyRebuilder implements Runnable {
 				logger.warning(e.getMessage());
 				logger.warning("Cannot dump connection table!");
 				return;
+			}
+		} else { // Reset this file
+			File f = new File(dmpPath.toString());
+			FileWriter fw = null;
+			try {
+				fw = new FileWriter(f);
+				fw.write("");
+				fw.flush();
+				fw.close();
+			} catch (IOException e) {
+				logger.severe("File emptying failed!");
 			}
 		}
 		// @formatter:off
@@ -451,14 +518,55 @@ public class NetPolicyRebuilder implements Runnable {
 		}
 	}
 
+	/**
+	 * args[0] is continuous collection time in minutes
+	 * 
+	 * @param args
+	 * @throws ClassNotFoundException
+	 * @throws SQLException
+	 * @throws PcapNativeException
+	 * @throws NotOpenException
+	 * @throws InterruptedException
+	 */
 	public static void main(String[] args)
 			throws ClassNotFoundException, SQLException, PcapNativeException, NotOpenException, InterruptedException {
+		long duration = 0; // continuous running time
+		if (args.length > 0 && (args[0].equals("-h") || args[0].equals("--h") || !Util.isInteger(args[0]))) {
+			logger.info("You can provide 1 parameter of continuous running time in minutes!");
+			return;
+		} else if (args.length == 0) {
+			duration = 60000; // The default execution time is 1 minute
+		} else if (args.length == 1) {
+			duration = Integer.parseInt(args[0]) * 60000;
+		}
 		initDB();
 		NetPolicyRebuilder npr = new NetPolicyRebuilder();
 		npr.start();
+		Runtime.getRuntime().addShutdownHook(new Thread() { // Unforeseen end occurred during execution
+			public void run() {
+				try {
+					ph.breakLoop(); // Stop collecting packets
+					Thread.sleep(5000); // Wait for data writing complete
+					dump(); // Dump to file
+				} catch (SQLException | NotOpenException | InterruptedException e) {
+					logger.severe(e.getMessage());
+				}
+			}
+		});
+		long startMillis = System.currentTimeMillis();
+		long endMillis = startMillis + duration;
+		logger.info("Network strategy under reconstruction ...");
+		logger.info("Started at " + new DateTime().toString("yyyy/MM/dd HH:mm:ss") + ".");
+		logger.info("Expected to end at " + new DateTime(endMillis).toString() + ".");
 		while (true) {
-			Thread.sleep(60000);
-			dump();
+			logger.info("Analyzing packets ...");
+			Thread.sleep(600000);
+			if (System.currentTimeMillis() > endMillis) {
+				ph.breakLoop(); // Stop collecting packets
+				Thread.sleep(5000); // Wait for data writing complete
+				dump(); // Dump to file
+				break;
+			}
 		}
 	}
 
@@ -478,7 +586,7 @@ public class NetPolicyRebuilder implements Runnable {
 		} catch (NotOpenException e) {
 			logger.warning(e.getMessage());
 		} catch (InterruptedException e) {
-			logger.warning(e.getMessage());
+			logger.warning("The traffic collection thread has been terminated.");
 		}
 	}
 

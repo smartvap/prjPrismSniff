@@ -15,6 +15,7 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.logging.Logger;
+import java.util.regex.Pattern;
 
 import org.hyperic.sigar.NetConnection;
 import org.hyperic.sigar.NetFlags;
@@ -151,6 +152,11 @@ public class Util {
 			sock = null;
 			return false;
 		}
+	}
+	
+	public static boolean isInteger(String str) {
+		Pattern pattern = Pattern.compile("^[-\\+]?[\\d]*$");
+		return pattern.matcher(str).matches();
 	}
 
 	/**
