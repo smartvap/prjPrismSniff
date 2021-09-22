@@ -467,7 +467,7 @@ public class NetPolicyRebuilder implements Runnable {
 			return;
 		}
 		String appPath = System.getProperty("user.dir");
-		Path dmpPath = Paths.get(appPath, "policy.json");
+		Path dmpPath = Paths.get(appPath, "policy-" + PortSniffer.getSerNum() + ".json");
 		if (!Files.exists(dmpPath)) {
 			try {
 				Files.createFile(dmpPath);
@@ -557,7 +557,7 @@ public class NetPolicyRebuilder implements Runnable {
 		long endMillis = startMillis + duration;
 		logger.info("Network strategy under reconstruction ...");
 		logger.info("Started at " + new DateTime().toString("yyyy/MM/dd HH:mm:ss") + ".");
-		logger.info("Expected to end at " + new DateTime(endMillis).toString() + ".");
+		logger.info("Expected to end at " + new DateTime(endMillis).toString("yyyy/MM/dd HH:mm:ss") + ".");
 		while (true) {
 			logger.info("Analyzing packets ...");
 			Thread.sleep(600000);

@@ -1,15 +1,12 @@
 package org.ayakaji.network.prism;
 
-import java.io.File;
-import java.io.FileWriter;
+import java.io.BufferedReader;
 import java.io.IOException;
+import java.io.InputStreamReader;
 import java.net.Inet4Address;
-import java.net.Inet6Address;
 import java.net.InterfaceAddress;
 import java.net.NetworkInterface;
 import java.net.SocketException;
-import java.nio.file.Path;
-import java.nio.file.Paths;
 import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.Map;
@@ -44,10 +41,27 @@ public class AppVerifier {
 				+ Integer.valueOf(binary.substring(16, 24), 2) + "." + Integer.valueOf(binary.substring(24, 32), 2);
 	}
 
+	public static String GetSerNum() {
+		String[] command = { "dmidecode -s system-serial-number" };
+		String sNum = null;
+		try {
+			Process SerNumProcess = Runtime.getRuntime().exec(command);
+			BufferedReader sNumReader = new BufferedReader(new InputStreamReader(SerNumProcess.getInputStream()));
+			sNum = sNumReader.readLine().trim();
+			SerNumProcess.waitFor();
+			sNumReader.close();
+		} catch (Exception ex) {
+			sNum = "Did not work";
+		} finally {
+			return sNum;
+		}
+	}
+
 	public static void main(String[] args) throws InterruptedException, IOException {
 //		System.out.println(getV4InetAddrs());
 //		System.out.println(getMask(28));
-		String appPath = System.getProperty("user.dir");
-		Path dmpPath = Paths.get(appPath, "policy.json");
+//		String appPath = System.getProperty("user.dir");
+//		Path dmpPath = Paths.get(appPath, "policy.json");
+		System.out.println(GetSerNum());
 	}
 }

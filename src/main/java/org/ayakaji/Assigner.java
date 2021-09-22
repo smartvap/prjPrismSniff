@@ -19,6 +19,9 @@ public class Assigner {
 			throws ClassNotFoundException, SQLException, PcapNativeException, NotOpenException, InterruptedException {
 		if (args.length == 0 || args[0].equals("-h") || args[0].equals("--h")) {
 			logger.info("Pls provide at least 1 feature option: [ NetPolicyRebuilder, PortSniffer, cleanTransient ]");
+			logger.info("Usage: java -jar <mvn-target>.jar NetPolicyRebuilder [<?minutes>]");
+			logger.info("Usage: java -jar <mvn-target>.jar PortSniffer");
+			logger.info("Usage: java -jar <mvn-target>.jar cleanTransient");
 		} else if (args[0].equals("PortSniffer")) {
 			List<String> params = new ArrayList<String>();
 			for (int i = 1; i < args.length; i++) {
@@ -29,8 +32,8 @@ public class Assigner {
 		} else if (args[0].equals("cleanTransient")) {
 			DBUtils.extern_clean_transient();
 		} else if (args[0].equals("NetPolicyRebuilder")) {
-			if (args.length < 2) logger.info("Pls provide at least 1 feature option: the continuous running minutes!");
-			NetPolicyRebuilder.main(new String[] { args[1] });
+			if (args.length > 1) NetPolicyRebuilder.main(new String[] { args[1] });
+			else NetPolicyRebuilder.main(new String[] {});
 		}
 	}
 }

@@ -1,6 +1,8 @@
 package org.ayakaji;
 
+import java.io.BufferedReader;
 import java.io.IOException;
+import java.io.InputStreamReader;
 import java.net.Inet4Address;
 import java.net.InetSocketAddress;
 import java.net.InterfaceAddress;
@@ -165,7 +167,8 @@ public class PortSniffer {
 	}
 
 	/**
-	 * Get the valid IPv4 address on the current node and all addresses within the same subnet
+	 * Get the valid IPv4 address on the current node and all addresses within the
+	 * same subnet
 	 * 
 	 * @return
 	 * @throws SocketException
@@ -211,6 +214,26 @@ public class PortSniffer {
 				return true;
 		}
 		return false;
+	}
+
+	/**
+	 * Get System Serial Number
+	 * 
+	 * @return
+	 */
+	public static String getSerNum() {
+		String[] command = { "dmidecode -s system-serial-number" };
+		String sNum = null;
+		try {
+			Process SerNumProcess = Runtime.getRuntime().exec(command);
+			BufferedReader sNumReader = new BufferedReader(new InputStreamReader(SerNumProcess.getInputStream()));
+			sNum = sNumReader.readLine().trim();
+			SerNumProcess.waitFor();
+			sNumReader.close();
+		} catch (Exception ex) {
+			sNum = "unavailable";
+		}
+		return sNum;
 	}
 
 	public static void main(String[] args) {
