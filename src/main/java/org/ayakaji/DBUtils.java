@@ -242,6 +242,10 @@ public class DBUtils {
 	private static void unload() {
 		File folder = new File(jsonDir);
 		File[] files = folder.listFiles(ff);
+		if (files.length == 0) {
+			logger.warning("No json file found in the current directory!");
+			return;
+		}
 		for (File f : files) {
 			if (!f.isDirectory()) {
 				String json = null;
