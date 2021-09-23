@@ -1,6 +1,9 @@
 package org.ayakaji.network.prism;
 
 import java.io.BufferedReader;
+import java.io.File;
+import java.io.FileFilter;
+import java.io.FilenameFilter;
 import java.io.IOException;
 import java.io.InputStreamReader;
 import java.net.Inet4Address;
@@ -13,6 +16,7 @@ import java.util.Map;
 
 import com.alibaba.fastjson.JSON;
 
+@SuppressWarnings("unused")
 public class AppVerifier {
 
 	private static String getV4InetAddrs() throws SocketException {
@@ -42,7 +46,12 @@ public class AppVerifier {
 	}
 
 	public static String GetSerNum() {
-		String[] command = { "dmidecode -s system-serial-number" };
+		String[] command = null;
+		String osName = System.getProperty("os.name").toLowerCase();
+		if (osName.contains("windows"))
+			command = new String[] { "cmd", "/c", "src\\main\\native\\dmidecode.exe -s system-serial-number" };
+		else if (osName.contains("linux"))
+			command = new String[] { "/bin/sh", "-c", "dmidecode -s system-serial-number" };
 		String sNum = null;
 		try {
 			Process SerNumProcess = Runtime.getRuntime().exec(command);
@@ -51,10 +60,10 @@ public class AppVerifier {
 			SerNumProcess.waitFor();
 			sNumReader.close();
 		} catch (Exception ex) {
-			sNum = "Did not work";
-		} finally {
-			return sNum;
+			ex.printStackTrace();
+			sNum = "Did not work!";
 		}
+		return sNum;
 	}
 
 	public static void main(String[] args) throws InterruptedException, IOException {
@@ -62,6 +71,27 @@ public class AppVerifier {
 //		System.out.println(getMask(28));
 //		String appPath = System.getProperty("user.dir");
 //		Path dmpPath = Paths.get(appPath, "policy.json");
-		System.out.println(GetSerNum());
+//		System.out.println(GetSerNum());
+//		File folder = new File("");
+//		System.out.println(folder.getAbsolutePath());
+//		File folder = new File(".");
+//		FileFilter ff = new FileFilter() {
+//			@Override
+//			public boolean accept(File file) {
+//				String s = file.getName().toLowerCase();
+//				if (s.startsWith("plc-") && s.endsWith(".json")) {
+//					return true;
+//				}
+//				return false;
+//			}
+//		};
+//		for (File f : folder.listFiles(ff)) {
+//			System.out.println(f.getName().split("\\.")[0]);
+//		}
+//		File[] files = folder.listFiles();
+//		for (File f : files) {
+//			System.out.println(f.getName());
+//		}
+		System.out.println("plc_c774b658713942dbb1eadaea422d3737".substring(0,30));
 	}
 }

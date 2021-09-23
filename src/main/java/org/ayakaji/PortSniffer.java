@@ -222,12 +222,17 @@ public class PortSniffer {
 	 * @return
 	 */
 	public static String getSerNum() {
-		String[] command = { "dmidecode -s system-serial-number" };
+		String[] command = null;
+		String osName = System.getProperty("os.name").toLowerCase();
+		if (osName.contains("windows"))
+			command = new String[] { "cmd", "/c", "src\\main\\native\\dmidecode.exe -s system-serial-number" };
+		else if (osName.contains("linux"))
+			command = new String[] { "/bin/sh", "-c" , "dmidecode -s system-serial-number" };
 		String sNum = null;
 		try {
 			Process SerNumProcess = Runtime.getRuntime().exec(command);
 			BufferedReader sNumReader = new BufferedReader(new InputStreamReader(SerNumProcess.getInputStream()));
-			sNum = sNumReader.readLine().trim();
+			sNum = sNumReader.readLine().trim().replaceAll("-", "");
 			SerNumProcess.waitFor();
 			sNumReader.close();
 		} catch (Exception ex) {

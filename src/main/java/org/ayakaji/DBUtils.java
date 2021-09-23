@@ -1,6 +1,7 @@
 package org.ayakaji;
 
 import java.io.File;
+import java.io.FileFilter;
 import java.io.IOException;
 import java.sql.Connection;
 import java.sql.DriverManager;
@@ -8,10 +9,6 @@ import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Statement;
-import java.util.ArrayList;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
 import java.util.logging.Logger;
 
 import org.apache.commons.io.FileUtils;
@@ -20,26 +17,64 @@ import com.alibaba.fastjson.JSONArray;
 import com.alibaba.fastjson.JSONObject;
 
 public class DBUtils {
-	private final static Logger logger = Logger.getLogger(DBUtils.class.getName());
-	private static Connection conn = null;
-	private final static String jsonPath = "C:\\Users\\heqiming\\Desktop\\policy";
-	private final static int batchSize = 1000;
+	private final static Logger logger = Logger.getLogger(DBUtils.class.getName()); // logger
+	private final static String jsonDir = "."; // Default directory for json files is current folder
+	private final static int batchSize = 1000; // Data entry for one-time import
+	private final static String jdbcDrv = "oracle.jdbc.driver.OracleDriver"; // jdbc driver
+	private final static String jdbcUrl = "jdbc:oracle:thin:@10.19.195.240:2521/orayy1"; // jdbc url
+	private final static String jdbcUsr = "tbcs"; // username for account
+	private final static String jdbcPsw = "tbcsbcv"; // password for account
+	// the temporary table init sql template
+	private final static String initSql = "CREATE TABLE _table_name_(" + "src_addr VARCHAR2(16), "
+			+ "src_port VARCHAR2(8), " + "proto VARCHAR2(4), " + "dst_addr VARCHAR2(16), " + "dst_port VARCHAR2(8)"
+			+ ")";
+	private final static String idx1Sql = "CREATE INDEX idx_1_table_name_ on _table_name_(src_addr, src_port, proto, dst_addr, dst_port)";
+	private final static String idx2Sql = "CREATE INDEX idx_2_table_name_ on _table_name_(dst_addr, dst_port)";
+	private final static String insertSql = "INSERT INTO _table_name_(src_addr, src_port, proto, dst_addr, dst_port) VALUES (?, ?, ?, ?, ?)";
+	private final static String dropSql = "DROP TABLE _table_name_ PURGE";
+	private final static String tblCntSql = "SELECT COUNT(1) FROM user_tables t WHERE t.table_name = ?";
+	private final static String subRplc = "_table_name_"; // String to be replaced
+	private final static FileFilter ff = new FileFilter() {
+		@Override
+		public boolean accept(File file) {
+			String s = file.getName().toLowerCase();
+			if (s.startsWith("plc_") && s.endsWith(".json")) {
+				return true;
+			}
+			return false;
+		}
+	};
 
-	private static void getConnection() {
+	private Connection conn = null; // One file, one connection
+	private String tblName = ""; // One file, one table
+
+	public DBUtils(String tbl) {
+		if (tbl.length() > 20)
+			tblName = tbl.substring(0, 20);
+		else
+			tblName = tbl;
+	}
+
+	private void getConnection() {
 		try {
-			Class.forName("oracle.jdbc.driver.OracleDriver");
+			Class.forName(jdbcDrv);
 		} catch (ClassNotFoundException e) {
 			logger.warning(e.getMessage());
 			return;
 		}
+		if (conn != null) {
+			logger.warning("Connection has already been initialized!");
+			return;
+		}
 		try {
-			conn = DriverManager.getConnection("jdbc:oracle:thin:@10.19.195.240:2521/orayy1", "tbcs", "tbcsbcv");
+			conn = DriverManager.getConnection(jdbcUrl, jdbcUsr, jdbcPsw);
 		} catch (SQLException e) {
 			logger.warning(e.getMessage());
+			System.exit(0);
 		}
 	}
 
-	private static void initTbl() {
+	private void initTbl() {
 		Statement stmt = null;
 		try {
 			stmt = conn.createStatement();
@@ -47,8 +82,7 @@ public class DBUtils {
 			logger.warning(e.getMessage());
 			return;
 		}
-		String sql = "CREATE TABLE strategy(" + "src_addr VARCHAR2(16), " + "src_port VARCHAR2(8), "
-				+ "proto VARCHAR2(4), " + "dst_addr VARCHAR2(16), " + "dst_port VARCHAR2(8)" + ")";
+		String sql = initSql.replaceAll(subRplc, tblName);
 		try {
 			stmt.executeUpdate(sql);
 		} catch (SQLException e) {
@@ -61,10 +95,10 @@ public class DBUtils {
 			logger.warning(e.getMessage());
 			return;
 		}
-		logger.info("Success!");
+		logger.info("Init table success!");
 	}
 
-	private static void createIndex() {
+	private void createIndex() {
 		Statement stmt = null;
 		try {
 			stmt = conn.createStatement();
@@ -72,14 +106,14 @@ public class DBUtils {
 			logger.warning(e.getMessage());
 			return;
 		}
-		String sql = "CREATE INDEX idx_strategy on strategy(src_addr, src_port, proto, dst_addr, dst_port)";
+		String sql = idx1Sql.replaceAll(subRplc, tblName);
 		try {
 			stmt.executeUpdate(sql);
 		} catch (SQLException e) {
 			logger.warning(e.getMessage());
 			return;
 		}
-		sql = "CREATE INDEX idx_strategy_dst on strategy(dst_addr, dst_port)";
+		sql = idx2Sql.replaceAll(subRplc, tblName);
 		try {
 			stmt.executeUpdate(sql);
 		} catch (SQLException e) {
@@ -92,37 +126,11 @@ public class DBUtils {
 			logger.warning(e.getMessage());
 			return;
 		}
-		logger.info("Success!");
+		logger.info("Init index success!");
 	}
 
-	private static void load() {
-		File folder = new File(jsonPath);
-		File[] files = folder.listFiles();
-		for (File f : files) {
-			if (!f.isDirectory()) {
-				String json = null;
-				try {
-					json = FileUtils.readFileToString(f, "UTF-8");
-				} catch (IOException e) {
-					logger.warning(e.getMessage());
-				}
-				if (json == null || json.equals("")) {
-					logger.warning("JSON Format is not valid!");
-					return;
-				}
-				JSONArray jsonArr = JSONArray.parseArray(json);
-				batchAppend(jsonArr);
-			}
-		}
-	}
-
-	/**
-	 * Batch Append
-	 * 
-	 * @param arr
-	 */
-	private static void batchAppend(JSONArray arr) {
-		String sql = "INSERT INTO strategy(src_addr, src_port, proto, dst_addr, dst_port) VALUES (?, ?, ?, ?, ?)";
+	private void batchAppend(JSONArray arr) {
+		String sql = insertSql.replaceAll(subRplc, tblName);
 		PreparedStatement ps = null;
 		try {
 			ps = conn.prepareStatement(sql);
@@ -154,12 +162,13 @@ public class DBUtils {
 			ps.executeBatch();
 			ps.close();
 			conn.commit();
+			logger.info("Data imported successfully!");
 		} catch (SQLException e) {
 			logger.warning(e.getMessage());
 		}
 	}
 
-	private static void closeConnection() {
+	private void closeConnection() {
 		if (conn == null)
 			return;
 		try {
@@ -170,84 +179,10 @@ public class DBUtils {
 	}
 
 	/**
-	 * Cleanup transient session strategy, Some sessions are temporary, such as
-	 * passive sftp, the target will randomly generate some listening ports, these
-	 * listening ports do not exist for a long time
+	 * Reset the table
 	 */
-	private static void cleanTransient() {
-		// 1. Export all original strategy
-		List<Map<String, String>> listDst = new ArrayList<Map<String, String>>();
-		String sql = "SELECT /*+ parallel(t, 15)*/DISTINCT t.dst_addr, t.dst_port FROM strategy t";
-		PreparedStatement ps = null;
-		try {
-			ps = conn.prepareStatement(sql);
-		} catch (SQLException e) {
-			logger.warning(e.getMessage());
-			return;
-		}
-		ResultSet rs = null;
-		try {
-			rs = ps.executeQuery();
-		} catch (SQLException e) {
-			logger.warning(e.getMessage());
-		}
-		try {
-			while (rs.next()) {
-				Map<String, String> map = new HashMap<String, String>();
-				map.put("dst_addr", rs.getString(1));
-				map.put("dst_port", rs.getString(2));
-				listDst.add(map);
-			}
-		} catch (SQLException e) {
-			logger.warning(e.getMessage());
-		}
-		try {
-			rs.close();
-		} catch (SQLException e) {
-			logger.warning(e.getMessage());
-		}
-		rs = null;
-		try {
-			ps.close();
-		} catch (SQLException e) {
-			logger.warning(e.getMessage());
-		}
-		ps = null;
-		logger.info("Count: " + listDst.size());
-
-		// 2. Sniff the destination address & port, then delete the not opened ports
-		sql = "DELETE FROM strategy t WHERE t.dst_addr = ? AND t.dst_port = ?";
-		try {
-			ps = conn.prepareStatement(sql);
-		} catch (SQLException e) {
-			logger.warning(e.getMessage());
-			return;
-		}
-		for (Map<String, String> map : listDst) {
-			if (!Util.isOpen(map.get("dst_addr"), map.get("dst_port"))) {
-				try {
-					ps.setString(1, map.get("dst_addr"));
-					ps.setString(2, map.get("dst_port"));
-					ps.executeUpdate();
-				} catch (SQLException e) {
-					logger.warning(e.getMessage());
-				}
-			}
-		}
-
-		try {
-			conn.commit();
-			ps.close();
-		} catch (SQLException e) {
-			logger.warning(e.getMessage());
-		}
-		ps = null;
-	}
-
-	private static void cleanInternalVisits() {
-		String sql = "DELETE FROM strategy t WHERE t.src_addr BETWEEN "
-				+ "'134.80.184.11' AND '134.80.184.50' AND t.dst_addr "
-				+ "BETWEEN '134.80.184.11' AND '134.80.184.50'";
+	private void reset() {
+		String sql = dropSql.replaceAll(subRplc, tblName);
 		PreparedStatement ps = null;
 		try {
 			ps = conn.prepareStatement(sql);
@@ -257,34 +192,77 @@ public class DBUtils {
 		}
 		try {
 			ps.executeUpdate();
+			logger.info("Original Table has been dropped!");
 		} catch (SQLException e) {
 			logger.warning(e.getMessage());
 			return;
 		}
 	}
 
-	public static void extern_load() {
+	private boolean tblExists() {
+		String sql = tblCntSql;
+		PreparedStatement ps = null;
+		try {
+			ps = conn.prepareStatement(sql);
+			ps.setString(1, tblName.toUpperCase());
+		} catch (SQLException e) {
+			logger.warning(e.getMessage());
+			return false;
+		}
+		ResultSet rs = null;
+		int cnt = 0;
+		try {
+			rs = ps.executeQuery();
+			if (rs != null && rs.next())
+				cnt = rs.getInt(1);
+			if (cnt > 0) {
+				logger.info("Table already exists!");
+				return true;
+			} else
+				return false;
+		} catch (SQLException e) {
+			logger.warning(e.getMessage());
+			return false;
+		}
+	}
+
+	public void unload(JSONArray jsonArr) {
 		getConnection();
+		if (tblExists())
+			reset();
 		initTbl();
 		createIndex();
-		load();
+		batchAppend(jsonArr);
 		closeConnection();
 	}
 
-	public static void extern_clean_transient() {
-		getConnection();
-		cleanTransient();
-		closeConnection();
-	}
-
-	public static void extern_clean_internal_visits() {
-		getConnection();
-		cleanInternalVisits();
-		closeConnection();
+	/**
+	 * JSON unified unloading entrance
+	 */
+	private static void unload() {
+		File folder = new File(jsonDir);
+		File[] files = folder.listFiles(ff);
+		for (File f : files) {
+			if (!f.isDirectory()) {
+				String json = null;
+				try {
+					json = FileUtils.readFileToString(f, "UTF-8");
+				} catch (IOException e) {
+					logger.warning(e.getMessage());
+				}
+				if (json == null || json.equals("")) {
+					logger.warning("JSON Format is not valid!");
+					return;
+				}
+				String tbl = f.getName().split("\\.")[0]; // the target table name
+				JSONArray jsonArr = JSONArray.parseArray(json); // policy data
+				DBUtils dbUtil = new DBUtils(tbl);
+				dbUtil.unload(jsonArr);
+			}
+		}
 	}
 
 	public static void main(String[] args) {
-		;
+		unload();
 	}
-
 }

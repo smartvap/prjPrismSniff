@@ -29,8 +29,6 @@ public class Assigner {
 			}
 			String[] subArgs = params.toArray(new String[0]);
 			PortSniffer.main(subArgs);
-		} else if (args[0].equals("cleanTransient")) {
-			DBUtils.extern_clean_transient();
 		} else if (args[0].equals("NetPolicyRebuilder")) {
 			if (args.length > 1) NetPolicyRebuilder.main(new String[] { args[1] });
 			else NetPolicyRebuilder.main(new String[] {});
