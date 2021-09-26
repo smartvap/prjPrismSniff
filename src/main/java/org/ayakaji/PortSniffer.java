@@ -157,9 +157,10 @@ public class PortSniffer {
 			prefix = 32;
 		else if (prefix < 0)
 			prefix = 0;
+		logger.warning("The prefix is : " + prefix);
 		// Convert prefix to binary numeric string
-		String binary = String.format("%0" + prefix + "d", 0).replace("0", "1")
-				+ String.format("%0" + (32 - prefix) + "d", 0);
+		String binary = String.format("%0" + prefix + "d", 0).replace("0", "1");
+		if (prefix < 32) binary += String.format("%0" + (32 - prefix) + "d", 0);
 		// Divide the binary numeric string into 4 equal parts, then convert to decimal
 		// and merge them
 		return Integer.valueOf(binary.substring(0, 8), 2) + "." + Integer.valueOf(binary.substring(8, 16), 2) + "."
@@ -204,9 +205,6 @@ public class PortSniffer {
 	 * @return
 	 */
 	public static boolean isSameSubnet(String srcAddr, String dstAddr, LinkedHashMap<String, List<String>> mapAddrs) {
-		if (dstAddr.equals("134.80.19.90")) {
-			System.out.println("captured!");
-		}
 		Iterator<String> itrKey = mapAddrs.keySet().iterator();
 		while (itrKey.hasNext()) {
 			List<String> ipList = mapAddrs.get(itrKey.next());
@@ -227,7 +225,7 @@ public class PortSniffer {
 		if (osName.contains("windows"))
 			command = new String[] { "cmd", "/c", "src\\main\\native\\dmidecode.exe -s system-serial-number" };
 		else if (osName.contains("linux"))
-			command = new String[] { "/bin/sh", "-c" , "dmidecode -s system-serial-number" };
+			command = new String[] { "/bin/sh", "-c" , "dmidecode -s system-serial-number | grep -v '^#'" };
 		String sNum = null;
 		try {
 			Process SerNumProcess = Runtime.getRuntime().exec(command);

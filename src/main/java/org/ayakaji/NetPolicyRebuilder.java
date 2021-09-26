@@ -21,6 +21,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.logging.Logger;
 
+import org.apache.commons.io.FileUtils;
 import org.joda.time.DateTime;
 import org.pcap4j.core.BpfProgram.BpfCompileMode;
 import org.pcap4j.core.NotOpenException;
@@ -39,6 +40,7 @@ import org.pcap4j.packet.UdpPacket.UdpHeader;
 import org.pcap4j.packet.namednumber.TcpPort;
 import org.pcap4j.packet.namednumber.UdpPort;
 
+import com.alibaba.fastjson.JSONArray;
 import com.alibaba.fastjson.JSONObject;
 
 public class NetPolicyRebuilder implements Runnable {
@@ -519,6 +521,90 @@ public class NetPolicyRebuilder implements Runnable {
 	}
 
 	/**
+	 * Cleanup transient session strategy, Some sessions are temporary, such as
+	 * passive sftp, the target will randomly generate some listening ports, these
+	 * listening ports do not exist for a long time
+	 */
+	public static void cleanTransient() {
+		// 1. Read the strategy json file
+		String appPath = System.getProperty("user.dir");
+		Path oriPath = Paths.get(appPath, "plc_" + PortSniffer.getSerNum() + ".json");
+		if (!Files.exists(oriPath)) {
+			logger.warning("The rebuilt policy file could not be found! Pls rebuild policy first!");
+			return;
+		}
+		File f = new File(oriPath.toString());
+		String json = null;
+		try {
+			json = FileUtils.readFileToString(f, "UTF-8");
+			logger.info("Read policy file success!");
+		} catch (IOException e) {
+			logger.warning(e.getMessage());
+			logger.warning("Read policy file failed!");
+			return;
+		}
+		if (json == null || json.equals("")) {
+			logger.warning("JSON Format is not valid!");
+			return;
+		}
+		JSONArray jsonArr = JSONArray.parseArray(json);
+		logger.info("Policy Count: " + jsonArr.size());
+
+		// 2. Clean the transient policies: sniff the destination address & port, then
+		// delete the not opened ports
+		JSONArray result = new JSONArray();
+		for (int i = 0; i < jsonArr.size(); i++) {
+			JSONObject jsonOld = jsonArr.getJSONObject(i);
+			String dstAddr = jsonOld.getString("dst_addr");
+			String dstPort = jsonOld.getString("dst_port");
+			if (Util.isOpen(dstAddr, dstPort)) {
+				// To prevent properties disorder
+				JSONObject jsonNew = new JSONObject(new LinkedHashMap<String, Object>());
+				jsonNew.put("src_addr", jsonOld.getString("src_addr"));
+				jsonNew.put("src_port", jsonOld.getString("src_port"));
+				jsonNew.put("proto", jsonOld.getString("proto"));
+				jsonNew.put("dst_addr", dstAddr);
+				jsonNew.put("dst_port", dstPort);
+				result.add(jsonNew);
+			}
+		}
+
+		// 3. Write the new JSON to file
+		logger.info(
+				"The total number of strategies after the instantaneous strategy is cleaned up is: " + result.size());
+		String jsonResult = JSONArray.toJSONString(result, true);
+		Path dmpPath = Paths.get(appPath, "plc_" + PortSniffer.getSerNum() + "_clean.json");
+		if (!Files.exists(dmpPath)) {
+			try {
+				Files.createFile(dmpPath);
+			} catch (IOException e) {
+				logger.warning(e.getMessage());
+				logger.warning("Cannot create new policy file!");
+				return;
+			}
+		} else { // Reset this file
+			File f2 = new File(dmpPath.toString());
+			FileWriter fw = null;
+			try {
+				fw = new FileWriter(f2);
+				fw.write("");
+				fw.flush();
+				fw.close();
+			} catch (IOException e) {
+				logger.severe("File emptying failed!");
+			}
+		}
+		try {
+			Files.write(dmpPath, jsonResult.getBytes(StandardCharsets.UTF_8), StandardOpenOption.CREATE);
+			logger.info("Write policy file success!");
+		} catch (IOException e) {
+			logger.warning(e.getMessage());
+			logger.warning("Cannot dump cleaned policy!");
+			return;
+		}
+	}
+
+	/**
 	 * args[0] is continuous collection time in minutes
 	 * 
 	 * @param args
@@ -545,9 +631,12 @@ public class NetPolicyRebuilder implements Runnable {
 		Runtime.getRuntime().addShutdownHook(new Thread() { // Unforeseen end occurred during execution
 			public void run() {
 				try {
+					logger.warning("Termination signal detected!");
 					ph.breakLoop(); // Stop collecting packets
+					logger.warning("Stop collecting packets ...");
 					Thread.sleep(5000); // Wait for data writing complete
 					dump(); // Dump to file
+					logger.warning("Complete data dump!");
 				} catch (SQLException | NotOpenException | InterruptedException e) {
 					logger.severe(e.getMessage());
 				}

@@ -18,7 +18,7 @@ import com.alibaba.fastjson.JSONObject;
 
 public class DBUtils {
 	private final static Logger logger = Logger.getLogger(DBUtils.class.getName()); // logger
-	private final static String jsonDir = "."; // Default directory for json files is current folder
+	private final static String jsonDir = ".\\plc"; // Default directory for json files is current folder
 	private final static int batchSize = 1000; // Data entry for one-time import
 	private final static String jdbcDrv = "oracle.jdbc.driver.OracleDriver"; // jdbc driver
 	private final static String jdbcUrl = "jdbc:oracle:thin:@10.19.195.240:2521/orayy1"; // jdbc url
