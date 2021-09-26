@@ -37,6 +37,8 @@ public class Assigner {
 			else NetPolicyRebuilder.main(new String[] {});
 		} else if (args[0].equals("CleanTransient")) {
 			NetPolicyRebuilder.cleanTransient();
+		} else if (args[0].equals("NetPolicyVerifier")) {
+			NetPolicyVerifier.main(new String[] {});
 		}
 	}
 }

@@ -2,13 +2,20 @@ package org.ayakaji;
 
 import java.io.File;
 import java.io.FileFilter;
+import java.io.FileWriter;
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
+import java.nio.file.StandardOpenOption;
 import java.sql.Connection;
 import java.sql.DriverManager;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Statement;
+import java.util.LinkedHashMap;
 import java.util.logging.Logger;
 
 import org.apache.commons.io.FileUtils;
@@ -18,7 +25,7 @@ import com.alibaba.fastjson.JSONObject;
 
 public class DBUtils {
 	private final static Logger logger = Logger.getLogger(DBUtils.class.getName()); // logger
-	private final static String jsonDir = ".\\plc"; // Default directory for json files is current folder
+	private final static String jsonDir = ".\\plc_clean\\plc_clean"; // Default directory for json files is current folder
 	private final static int batchSize = 1000; // Data entry for one-time import
 	private final static String jdbcDrv = "oracle.jdbc.driver.OracleDriver"; // jdbc driver
 	private final static String jdbcUrl = "jdbc:oracle:thin:@10.19.195.240:2521/orayy1"; // jdbc url
@@ -34,6 +41,9 @@ public class DBUtils {
 	private final static String dropSql = "DROP TABLE _table_name_ PURGE";
 	private final static String tblCntSql = "SELECT COUNT(1) FROM user_tables t WHERE t.table_name = ?";
 	private final static String subRplc = "_table_name_"; // String to be replaced
+	private final static String outboundSql = "SELECT DISTINCT dst_addr, dst_port FROM plc_full t WHERE t.direction = 'outbound' ORDER BY t.dst_addr, t.dst_port";
+	private final static String unreachableAppendSql = "INSERT INTO plc_out_unreachable(src_addr, src_port, proto, dst_addr, dst_port) VALUES (?, ?, ?, ?, ?)";
+	
 	private final static FileFilter ff = new FileFilter() {
 		@Override
 		public boolean accept(File file) {
@@ -228,8 +238,11 @@ public class DBUtils {
 
 	public void unload(JSONArray jsonArr) {
 		getConnection();
-		if (tblExists())
-			reset();
+		if (tblExists()) {
+			closeConnection();
+			return;
+		}
+//			reset();
 		initTbl();
 		createIndex();
 		batchAppend(jsonArr);
@@ -265,8 +278,80 @@ public class DBUtils {
 			}
 		}
 	}
+	
+	private void loadOutPlc2JSON() {
+		PreparedStatement ps = null;
+		try {
+			ps = conn.prepareStatement(outboundSql);
+		} catch (SQLException e) {
+			logger.warning(e.getMessage());
+			return;
+		}
+		
+		JSONArray jsonArr = new JSONArray();
+		ResultSet rs = null;
+		try {
+			rs = ps.executeQuery();
+			while (rs.next()) {
+				JSONObject obj = new JSONObject(new LinkedHashMap<String, Object>());
+				obj.put("dst_addr", rs.getString(1));
+				obj.put("dst_port", rs.getString(2));
+				jsonArr.add(obj);
+			}
+		} catch (SQLException e) {
+			logger.warning(e.getMessage());
+			return;
+		}
+		try {
+			ps.close();
+			conn.commit();
+			logger.info("Data imported successfully!");
+		} catch (SQLException e) {
+			logger.warning(e.getMessage());
+		}
+		
+		String appPath = System.getProperty("user.dir");
+		Path dmpPath = Paths.get(appPath, "plc_outbound_full.json");
+		if (!Files.exists(dmpPath)) {
+			try {
+				Files.createFile(dmpPath);
+			} catch (IOException e) {
+				logger.warning(e.getMessage());
+				logger.warning("Cannot create file!");
+				return;
+			}
+		} else { // Reset this file
+			File f = new File(dmpPath.toString());
+			FileWriter fw = null;
+			try {
+				fw = new FileWriter(f);
+				fw.write("");
+				fw.flush();
+				fw.close();
+			} catch (IOException e) {
+				logger.severe("File emptying failed!");
+			}
+		}
+		
+		String json = JSONObject.toJSONString(jsonArr, true);
+		try {
+			Files.write(dmpPath, json.getBytes(StandardCharsets.UTF_8), StandardOpenOption.CREATE);
+		} catch (IOException e) {
+			logger.warning(e.getMessage());
+			logger.warning("Cannot dump outbound policies!");
+			return;
+		}
+	}
+	
+	public static void loadOutPlc() {
+		DBUtils dbUtil = new DBUtils("");
+		dbUtil.getConnection();
+		dbUtil.loadOutPlc2JSON();
+		dbUtil.closeConnection();
+	}
 
 	public static void main(String[] args) {
-		unload();
+//		unload();
+		loadOutPlc();
 	}
 }
