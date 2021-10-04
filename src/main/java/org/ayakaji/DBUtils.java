@@ -25,7 +25,7 @@ import com.alibaba.fastjson.JSONObject;
 
 public class DBUtils {
 	private final static Logger logger = Logger.getLogger(DBUtils.class.getName()); // logger
-	private final static String jsonDir = ".\\plc_clean\\plc_clean"; // Default directory for json files is current folder
+	private final static String jsonDir = ".\\plc_unreachable"; // Default directory for json files is current folder
 	private final static int batchSize = 1000; // Data entry for one-time import
 	private final static String jdbcDrv = "oracle.jdbc.driver.OracleDriver"; // jdbc driver
 	private final static String jdbcUrl = "jdbc:oracle:thin:@10.19.195.240:2521/orayy1"; // jdbc url
@@ -42,7 +42,6 @@ public class DBUtils {
 	private final static String tblCntSql = "SELECT COUNT(1) FROM user_tables t WHERE t.table_name = ?";
 	private final static String subRplc = "_table_name_"; // String to be replaced
 	private final static String outboundSql = "SELECT DISTINCT dst_addr, dst_port FROM plc_full t WHERE t.direction = 'outbound' ORDER BY t.dst_addr, t.dst_port";
-	private final static String unreachableAppendSql = "INSERT INTO plc_out_unreachable(src_addr, src_port, proto, dst_addr, dst_port) VALUES (?, ?, ?, ?, ?)";
 	
 	private final static FileFilter ff = new FileFilter() {
 		@Override
@@ -351,7 +350,7 @@ public class DBUtils {
 	}
 
 	public static void main(String[] args) {
-//		unload();
-		loadOutPlc();
+		unload();
+//		loadOutPlc();
 	}
 }
