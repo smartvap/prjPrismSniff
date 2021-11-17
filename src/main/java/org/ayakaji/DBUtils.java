@@ -190,6 +190,7 @@ public class DBUtils {
 	/**
 	 * Reset the table
 	 */
+	@SuppressWarnings("unused")
 	private void reset() {
 		String sql = dropSql.replaceAll(subRplc, tblName);
 		PreparedStatement ps = null;
